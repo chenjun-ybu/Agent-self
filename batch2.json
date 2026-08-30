@@ -1,0 +1,7 @@
+[
+  {"sample_id": "T001", "SMILES": "CCN", "property_name": "boiling_point", "property_value": 351.5, "unit": "K"},
+  {"sample_id": "T002", "SMILES": "CC(C)O", "property_name": "boiling_point", "property_value": 82.6, "unit": "C"},
+  {"sample_id": "T003", "SMILES": "c1ccccc1", "property_name": "boiling_point", "property_value": 80.1, "unit": "C"},
+  {"sample_id": "T004", "SMILES": "CC(=O)OCC", "property_name": "boiling_point", "property_value": 77.1, "unit": "C"},
+  {"sample_id": "T005", "SMILES": "ClCCl", "property_name": "boiling_point", "property_value": 40.0, "unit": "C"}
+]
