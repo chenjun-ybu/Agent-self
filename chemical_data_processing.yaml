@@ -1,0 +1,146 @@
+name: chemical_data_processing
+version: "1.0"
+description: >
+  化学数据处理 Skill。对包含 sample_id、SMILES、性质数值和单位的
+  小型化学数据执行 SMILES 校验、单位换算、重复记录检查，并在发现
+  冲突时请求用户确认。将临时生成的行动转化为可复用的程序性知识。
+
+applicable_scenarios:
+  - 批量化学数据的清洗与标准化
+  - 化合物性质数据的预处理与质控
+  - 多来源化学数据的合并与去重
+
+input:
+  type: object
+  fields:
+    records:
+      type: list[dict]
+      description: 化学数据记录列表
+      required: true
+      item_fields:
+        sample_id:
+          type: string
+          description: 样品唯一标识
+          required: true
+        SMILES:
+          type: string
+          description: 分子的 SMILES 字符串
+          required: true
+        property_name:
+          type: string
+          description: 性质名称（如 melting_point, solubility）
+          required: false
+        property_value:
+          type: float
+          description: 性质数值
+          required: true
+        unit:
+          type: string
+          description: 数值单位
+          required: true
+    target_unit:
+      type: string
+      description: 目标换算单位
+      required: false
+      default: ""
+    property_type:
+      type: string
+      description: 性质类型（temperature/pressure/concentration）
+      required: false
+      default: ""
+
+output:
+  type: object
+  fields:
+    cleaned_data:
+      type: list[dict]
+      description: 清洗后的数据记录
+    issues:
+      type: list[string]
+      description: 发现的问题列表
+    execution_records:
+      type: list[dict]
+      description: 结构化调用记录（每步的请求与响应）
+    status:
+      type: string
+      description: 最终状态（success/error/needs_confirmation）
+
+execution_steps:
+  - step: 1
+    name: validate_smiles
+    description: 校验每条记录的 SMILES 合法性与必要字段完整性
+    tool: smiles_validator
+    input_mapping:
+      records: "$input.records"
+      required_fields: ["sample_id", "SMILES", "property_value", "unit"]
+    output:
+      valid_records: 通过校验的记录
+      issues: 字段缺失或 SMILES 无效的问题
+    on_error: 收集问题，如果全部无效则终止流程
+
+  - step: 2
+    name: convert_units
+    description: 将所有记录的单位统一换算到目标单位
+    tool: unit_converter
+    input_mapping:
+      records: "$step1.valid_records"
+      target_unit: "$input.target_unit"
+      property_type: "$input.property_type"
+    output:
+      converted_records: 换算后的记录
+      issues: 未知单位或转换失败的问题
+    on_error: 记录问题，继续处理有效记录
+
+  - step: 3
+    name: check_duplicates
+    description: 检测重复记录，识别冲突，必要时请求用户确认
+    tool: duplicate_checker
+    input_mapping:
+      records: "$step2.converted_records"
+      key_field: "sample_id"
+      compare_fields: ["SMILES", "property_value", "unit"]
+    output:
+      unique_records: 去重后的记录
+      duplicates: 完全重复的记录
+      conflicts: 存在数值冲突的重复记录
+    on_needs_confirmation: 返回冲突详情，等待用户决策
+    confirmation_options:
+      - keep_first: 保留第一条
+      - keep_last: 保留最后一条
+      - keep_both: 保留全部（标记来源）
+      - manual_review: 人工审核
+
+required_tools:
+  - smiles_validator
+  - unit_converter
+  - duplicate_checker
+
+exception_handling:
+  invalid_smiles:
+    action: 标记为错误记录，从后续流程中排除
+    message: "SMILES '{value}' 无效: {reason}"
+  missing_field:
+    action: 标记为错误记录，跳过该条
+    message: "记录 {sample_id} 缺失字段: {fields}"
+  unknown_unit:
+    action: 返回错误，提示用户指定目标单位或提供换算规则
+    message: "未知单位 '{unit}'，无法换算"
+  conflicting_duplicate:
+    action: 返回 needs_confirmation 状态，附带冲突详情
+    message: "sample_id={id} 存在冲突记录，请确认保留策略"
+  all_records_invalid:
+    action: 终止流程，返回错误状态
+    message: "所有记录均无效，流程终止"
+
+protocol:
+  request_format:
+    tool_name: string
+    parameters: object
+    call_id: string
+  response_format:
+    tool_name: string
+    call_id: string
+    status: enum[success, error, needs_confirmation]
+    result: object
+    error: string|null
+    confirmation_request: object|null
